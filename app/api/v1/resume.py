@@ -1,8 +1,9 @@
+import uuid
 from fastapi import APIRouter, UploadFile, File, BackgroundTasks, Depends, HTTPException
 from app.schemas.resume import ResumeUploadResponse
 from app.tasks import process_resume_task
 from app.api import dependencies
-import uuid
+from app.core.security import verify_firebase_token  # 🛡️ New Security Import
 
 router = APIRouter()
 
@@ -10,18 +11,28 @@ router = APIRouter()
 async def upload_resume(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    db=Depends(dependencies.get_db)
+    db=Depends(dependencies.get_db),
+    current_user: dict = Depends(verify_firebase_token)
 ):
-   
-    if not file.filename.endswith((".pdf", ".png", ".jpg", ".jpeg")):
-        raise HTTPException(status_code=400, detail="Invalid file format.")
+    """
+    Securely receives a resume, validates format, and offloads processing
+    to a background task linked to the authenticated user's ID.
+    """
+    
+    if not file.filename.lower().endswith((".pdf", ".png", ".jpg", ".jpeg")):
+        raise HTTPException(
+            status_code=400, 
+            detail="Invalid file format. Please upload a PDF or an Image."
+        )
 
     job_id = str(uuid.uuid4())
+    
+    user_id = current_user.get("uid")
 
-    background_tasks.add_task(process_resume_task, job_id, file, "guest_user")
+    background_tasks.add_task(process_resume_task, job_id, file, user_id)
 
     return {
         "job_id": job_id,
         "status": "processing",
-        "message": "Resume received.Portfolio design in progress."
+        "message": f"Resume received for {current_user.get('email')}. Portfolio design in progress."
     }

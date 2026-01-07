@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/showcase")
 
     SECRET_KEY: str = Field(..., env="SECRET_KEY")
+
+    FIREBASE_SERVICE_ACCOUNT_PATH: str = os.getenv(
+        "FIREBASE_SERVICE_ACCOUNT_PATH", 
+        "firebase-service-account.json"
+    )
     
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8 
