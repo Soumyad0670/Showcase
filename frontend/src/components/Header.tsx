@@ -1,43 +1,96 @@
+import React, { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { auth } from "@/lib/firebase";
+import { onAuthStateChanged, signOut, User } from "firebase/auth";
 import { Button } from "@/components/ui/button";
-import { Link } from "react-router-dom";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { LogOut, User as UserIcon, LayoutDashboard } from "lucide-react";
 
 export const Header = () => {
+  const [user, setUser] = useState<User | null>(null);
+  const navigate = useNavigate();
+
+  // 🛡️ Listen for Auth State changes
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      // If Firebase says no user, clear our local token just in case
+      if (!currentUser) {
+        localStorage.removeItem("token");
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      localStorage.removeItem("token");
+      navigate("/login");
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
+  };
+
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 border-b border-border/50 bg-background/80 backdrop-blur-xl">
-      <div className="container mx-auto flex h-16 items-center justify-between px-4">
-        {/* Logo */}
-        <Link to="/" className="flex items-center gap-2">
-          <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-glow-purple to-glow-pink" />
-          <span className="text-xl font-bold">Showcase</span>
-        </Link>
+    <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <div className="container flex h-16 items-center justify-between">
+        <div className="flex items-center gap-6 md:gap-10">
+          <Link to="/" className="flex items-center space-x-2">
+            <span className="inline-block font-bold text-xl">Showcase AI</span>
+          </Link>
+          <nav className="hidden md:flex gap-6">
+            <Link to="/templates" className="text-sm font-medium transition-colors hover:text-primary">Templates</Link>
+            <Link to="/pricing" className="text-sm font-medium transition-colors hover:text-primary">Pricing</Link>
+          </nav>
+        </div>
 
-        {/* Navigation */}
-        <nav className="hidden md:flex items-center gap-6">
-          <Link to="/features" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-            Features
-          </Link>
-          <Link to="/templates" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-            Templates
-          </Link>
-          <Link to="/pricing" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-            Pricing
-          </Link>
-          <Link to="/discover" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-            Discover
-          </Link>
-          <Link to="/docs" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-            Docs
-          </Link>
-        </nav>
-
-        {/* Auth Buttons */}
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
-            Log in
-          </Button>
-          <Button size="sm" className="bg-foreground text-background hover:bg-foreground/90">
-            Get started
-          </Button>
+        <div className="flex items-center gap-4">
+          {user ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="relative h-10 w-10 rounded-full">
+                  <Avatar className="h-10 w-10 border border-primary/20">
+                    <AvatarImage src={user.photoURL || ""} alt={user.displayName || "User"} />
+                    <AvatarFallback className="bg-primary/10">
+                      {user.displayName?.charAt(0) || <UserIcon size={20} />}
+                    </AvatarFallback>
+                  </Avatar>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-56" align="end" forceMount>
+                <DropdownMenuLabel className="font-normal">
+                  <div className="flex flex-col space-y-1">
+                    <p className="text-sm font-medium leading-none">{user.displayName}</p>
+                    <p className="text-xs leading-none text-muted-foreground">{user.email}</p>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => navigate("/editor")}>
+                  <LayoutDashboard className="mr-2 h-4 w-4" />
+                  <span>My Editor</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleLogout} className="text-destructive focus:text-destructive">
+                  <LogOut className="mr-2 h-4 w-4" />
+                  <span>Log out</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <div className="flex gap-2">
+              <Button variant="ghost" onClick={() => navigate("/login")}>Login</Button>
+              <Button onClick={() => navigate("/login")}>Get Started</Button>
+            </div>
+          )}
         </div>
       </div>
     </header>
