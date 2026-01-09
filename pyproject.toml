@@ -22,6 +22,13 @@ dependencies = [
     "python-docx>=1.1.0",
     "google-generativeai>=0.3.0",
     "aiofiles>=23.2.0",
+    "sqlmodel>=0.0.31",
+    "httpx>=0.28.1",
+    "email-validator>=2.3.0",
+    "tenacity>=9.1.2",
+    "firebase-admin>=7.1.0",
+    "jose>=1.0.0",
+    "python-jose[cryptography]>=3.5.0",
 ]
 
 [build-system]
