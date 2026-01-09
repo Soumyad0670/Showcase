@@ -15,9 +15,7 @@ async def upload_resume(
     # Allow guest uploads for public demo
     # current_user: dict = Depends(verify_firebase_token) 
 ):
-    # Mock user for public demo or extract from token manually if present
-    current_user = {"uid": "guest_" + str(uuid.uuid4())[:8], "email": "guest@showcase.ai"}
-    if not file.filename.lower().endswith((".pdf", ".png", ".jpg", ".jpeg")):
+   if not file.filename.lower().endswith((".pdf", ".png", ".jpg", ".jpeg")):
         raise HTTPException(
             status_code=400, 
             detail="Invalid file format. Please upload a PDF or an Image."

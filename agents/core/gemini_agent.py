@@ -11,7 +11,7 @@ class GeminiAgent(Agent):
     def __init__(self):
         # Initialize Agent with Gemini model
         super().__init__(
-            model=Gemini(id="gemini-1.5-pro"),
+            model=Gemini(id="gemini-2.5-flash"),
             markdown=False,
         )
 
