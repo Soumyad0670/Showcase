@@ -1,11 +1,12 @@
+import axios from "axios";
 import { useState, useEffect } from "react";
 import { useSearchParams, Link } from "react-router-dom";
-import { 
-  MessageSquare, 
-  Code, 
-  Eye, 
-  Settings, 
-  Play, 
+import {
+  MessageSquare,
+  Code,
+  Eye,
+  Settings,
+  Play,
   ArrowUp,
   PanelLeftClose,
   PanelLeftOpen,
@@ -18,6 +19,8 @@ import { Button } from "@/components/ui/button";
 const Editor = () => {
   const [searchParams] = useSearchParams();
   const initialPrompt = searchParams.get("prompt") || "";
+  const attachedFile = searchParams.get("fileName");
+  const jobId = searchParams.get("jobId");
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
   const [input, setInput] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -25,15 +28,55 @@ const Editor = () => {
   const [isGenerating, setIsGenerating] = useState(false);
 
   useEffect(() => {
-    if (initialPrompt) {
+    if (initialPrompt || attachedFile || jobId) {
+      const userParts = [];
+      if (initialPrompt) userParts.push(initialPrompt);
+      if (attachedFile) userParts.push(`[Attached: ${attachedFile}]`);
+      if (jobId) userParts.push(`[Job ID: ${jobId}]`);
+
+      const userContent = userParts.join("\n");
+
+      let assistantContent = "";
+      if (jobId) {
+        assistantContent = `I've received your resume (${attachedFile || "file"}). Job ID: ${jobId}.\n\nI am currently analyzing the document to extract your skills, experience, and projects. Once done, I will generate your portfolio structure.`;
+      } else {
+        assistantContent = `I'll help you create that! Let me build a ${initialPrompt.includes("landing") ? "landing page" : "web application"} for you.\n\nGenerating your project structure...`;
+      }
+
       setMessages([
-        { role: "user", content: initialPrompt },
-        { role: "assistant", content: `I'll help you create that! Let me build a ${initialPrompt.includes("landing") ? "landing page" : "web application"} for you.\n\nGenerating your project structure...` }
+        { role: "user", content: userContent },
+        { role: "assistant", content: assistantContent }
       ]);
-      setIsGenerating(true);
-      setTimeout(() => setIsGenerating(false), 2000);
+
+      if (jobId) {
+        setIsGenerating(true);
+        const intervalId = setInterval(async () => {
+          try {
+            const response = await axios.get(`http://localhost:8000/api/v1/portfolios/${jobId}`);
+            if (response.status === 200 && response.data) {
+              clearInterval(intervalId);
+              setMessages(prev => [...prev, {
+                role: "assistant",
+                content: "Analysis complete! I've created your portfolio based on the resume. Check the preview window."
+              }]);
+              setIsGenerating(false);
+              console.log("Portfolio Data:", response.data);
+            }
+          } catch (error) {
+            // Ignore 404 (still processing)
+          }
+        }, 3000);
+
+        // Helper timeout to stop polling eventually
+        setTimeout(() => clearInterval(intervalId), 120000);
+
+        return () => clearInterval(intervalId);
+      } else {
+        setIsGenerating(true);
+        setTimeout(() => setIsGenerating(false), 2000);
+      }
     }
-  }, [initialPrompt]);
+  }, [initialPrompt, attachedFile, jobId]);
 
   const handleSend = () => {
     if (!input.trim()) return;
@@ -41,9 +84,9 @@ const Editor = () => {
     setInput("");
     setIsGenerating(true);
     setTimeout(() => {
-      setMessages(prev => [...prev, { 
-        role: "assistant", 
-        content: "I've made those changes. You can see the updated preview on the right." 
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: "I've made those changes. You can see the updated preview on the right."
       }]);
       setIsGenerating(false);
     }, 1500);
@@ -77,14 +120,14 @@ const Editor = () => {
         <aside className={`${sidebarOpen ? 'w-80' : 'w-0'} border-r border-border flex flex-col transition-all duration-300 overflow-hidden`}>
           {/* Tabs */}
           <div className="flex border-b border-border">
-            <button 
+            <button
               onClick={() => setActiveTab("chat")}
               className={`flex-1 py-3 text-sm font-medium flex items-center justify-center gap-2 transition-colors ${activeTab === "chat" ? "text-foreground border-b-2 border-primary" : "text-muted-foreground hover:text-foreground"}`}
             >
               <MessageSquare className="h-4 w-4" />
               Chat
             </button>
-            <button 
+            <button
               onClick={() => setActiveTab("code")}
               className={`flex-1 py-3 text-sm font-medium flex items-center justify-center gap-2 transition-colors ${activeTab === "code" ? "text-foreground border-b-2 border-primary" : "text-muted-foreground hover:text-foreground"}`}
             >
@@ -161,7 +204,7 @@ const Editor = () => {
         </aside>
 
         {/* Toggle sidebar button */}
-        <button 
+        <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
           className="absolute left-0 top-1/2 -translate-y-1/2 z-10 p-1 bg-card border border-border rounded-r-lg hover:bg-muted transition-colors"
           style={{ left: sidebarOpen ? '318px' : '0px' }}

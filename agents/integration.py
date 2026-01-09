@@ -15,7 +15,7 @@ import asyncio
 import logging
 from typing import Any, Dict, Optional, Tuple
 
-from agents.orchestrator import get_orchestrator, PortfolioOrchestrator
+from agents.orchestrator.orchestrator_agent import get_orchestrator, PortfolioOrchestrator
 
 # Logging
 

@@ -28,7 +28,8 @@ async def get_my_portfolios(
 async def get_portfolio_by_job(
     job_id: str,
     db: Session = Depends(dependencies.get_db),
-    current_user: dict = Depends(verify_firebase_token)
+    # Relaxed auth for demo polling
+    # current_user: dict = Depends(verify_firebase_token)
 ):
 
     statement = select(Portfolio).where(Portfolio.job_id == job_id)
@@ -40,11 +41,9 @@ async def get_portfolio_by_job(
             detail="Portfolio not found."
         )
     
-    if portfolio.user_id != current_user.get("uid"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, 
-            detail="You do not have permission to view this portfolio."
-        )
+    # Validation logic skipped for demo to allow guest access via UUID
+    # if portfolio.user_id != current_user.get("uid"):
+    #     raise HTTPException(...)
 
     return portfolio
 

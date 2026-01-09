@@ -41,8 +41,10 @@ async def process_resume_task(job_id: str, file: UploadFile, user_id: str):
         except Exception as e:
             db.rollback()
             elapsed = time.time() - start_time
-            logger.exception(f"Job {job_id}: Failed after {elapsed:.2f}s | Error: {str(e)}")
-            raise
+            logger.error(f"Job {job_id}: FAILED after {elapsed:.2f}s", exc_info=True)
+            # Re-raise? In a background task, re-raising just prints to stderr. 
+            # We already logged it.
+            pass
 
         finally:
             await file.close()

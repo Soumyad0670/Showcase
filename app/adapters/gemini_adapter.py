@@ -71,14 +71,15 @@ class GeminiAdapter:
                 model_name: str = "gemini-pro",
                 timeout_seconds: int = 30,
                 max_retries: int = 3,
-                vision_model_name: str = "gemini-pro-vision"
+                vision_model_name: str = "gemini-1.5-flash"
                 ) -> None:
         
         if not api_key:
             raise ValueError("Gemini API key is required")
 
         self.api_key = api_key
-        self.model_name = model_name
+        # Use newer model default
+        self.model_name = "gemini-1.5-flash" 
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
 
@@ -90,7 +91,7 @@ class GeminiAdapter:
 
         # Initialize SDK for Vision (Hybrid approach)
         genai.configure(api_key=api_key)
-        self.vision_model = genai.GenerativeModel(vision_model_name)
+        self.vision_model = genai.GenerativeModel("gemini-1.5-flash")
 
 
     async def close(self) -> None:
@@ -282,7 +283,7 @@ class GeminiAdapter:
 
 
     #Vision model for OCR if needed
-    async def vision_to_text(self, image_bytes: bytes, prompt: Optional[str] = None) -> str:
+    async def vision_to_text(self, image_bytes: bytes, mime_type: str = "image/jpeg", prompt: Optional[str] = None) -> str:
         """
         Optional OCR capability.
         Only used if vision functionality is explicitly required.
@@ -296,7 +297,7 @@ class GeminiAdapter:
             content = [
                 prompt,
                 {
-                    "mime_type": "image/jpeg", # Assuming JPEG for now, strictly speaking should detect
+                    "mime_type": mime_type, 
                     "data": image_bytes
                 }
             ]

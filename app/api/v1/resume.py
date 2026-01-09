@@ -12,8 +12,11 @@ async def upload_resume(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db=Depends(dependencies.get_db),
-    current_user: dict = Depends(verify_firebase_token)
+    # Allow guest uploads for public demo
+    # current_user: dict = Depends(verify_firebase_token) 
 ):
+    # Mock user for public demo or extract from token manually if present
+    current_user = {"uid": "guest_" + str(uuid.uuid4())[:8], "email": "guest@showcase.ai"}
     if not file.filename.lower().endswith((".pdf", ".png", ".jpg", ".jpeg")):
         raise HTTPException(
             status_code=400, 

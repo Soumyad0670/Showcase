@@ -15,7 +15,7 @@ class OCRService:
             if len(content) > MAX_FILE_SIZE:
                 raise ValueError("File size exceeds the 5MB limit")
 
-            return await gemini_adapter.vision_to_text(content)
+            return await gemini_adapter.vision_to_text(content, mime_type=file.content_type)
 
         except ValueError as ve:
             raise HTTPException(status_code=400, detail=str(ve))

@@ -53,6 +53,8 @@ class AIService:
                     formatted_skills.append({"category": cat.capitalize(), "items": items})
                 portfolio_data["skills"] = formatted_skills
 
+            logger.info(f"AI Generated Portfolio Data (pre-validation): {json.dumps(portfolio_data, default=str)[:500]}...")
+
             try:
                 validated_data = PortfolioOutput(**portfolio_data)
                 logger.info("AI output successfully validated against PortfolioOutput schema")
