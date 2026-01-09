@@ -1,7 +1,8 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import AnyHttpUrl, validator, Field
-from typing import List, Union
+from pydantic import AnyHttpUrl, field_validator, Field, ValidationInfo
+from typing import List, Union, Any
 import os
+import json
 
 class Settings(BaseSettings):
   
@@ -13,28 +14,46 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/showcase")
 
-    SECRET_KEY: str = Field(..., env="SECRET_KEY")
-    
+    SECRET_KEY: str = Field(...)
+
+    FIREBASE_SERVICE_ACCOUNT_PATH: str = os.getenv(
+        "FIREBASE_SERVICE_ACCOUNT_PATH", 
+        "firebase-service-account.json"
+    )
+  
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8 
 
-    GEMINI_API_KEY: str = Field(..., env="GEMINI_API_KEY")
+    GEMINI_API_KEY: str = Field(...)
 
     GEMINI_VISION_MODEL: str = os.getenv("GEMINI_VISION_MODEL", "gemini-1.5-flash")
     GEMINI_AGENT_MODEL: str = os.getenv("GEMINI_AGENT_MODEL", "gemini-1.5-pro")
 
-    BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = Field(default_factory=list)
+    # GitHub OAuth Settings
+    GITHUB_CLIENT_ID: str = os.getenv("GITHUB_CLIENT_ID", "")
+    GITHUB_CLIENT_SECRET: str = os.getenv("GITHUB_CLIENT_SECRET", "")
 
-    @validator("BACKEND_CORS_ORIGINS", pre=True)
-    def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[List[str], str]:
-        if isinstance(v, str) and not v.startswith("["):
+    BACKEND_CORS_ORIGINS: Union[List[str], str] = []
+
+    @field_validator("BACKEND_CORS_ORIGINS", mode="before")
+    @classmethod
+    def assemble_cors_origins(cls, v: Any) -> List[str]:
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return []
+            if v.startswith("["):
+                try:
+                    return json.loads(v.replace("'", '"'))
+                except Exception:
+                    pass
             return [i.strip() for i in v.split(",")]
-        elif isinstance(v, (list, str)):
+        elif isinstance(v, list):
             return v
-        raise ValueError(v)
+        return []
 
     model_config = SettingsConfigDict(
-        env_file=".env", 
+        env_file=".env" if os.getenv("ENV") != "testing" else None,
         case_sensitive=True,
         extra="ignore"
     )

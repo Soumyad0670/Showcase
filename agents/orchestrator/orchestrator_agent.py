@@ -20,8 +20,8 @@ from dataclasses import dataclass, field
 
 from agents.middleware.data_preprocessor import DataPreprocessor
 from agents.core.schema_builder import SchemaBuilder
-from agents.generation.content_generator import ContentGenerator
-from agents.validation.validator import PortfolioValidator
+from agents.generation.generation_agent import ContentGenerator
+from agents.validation.validation_agent import ValidationAgent as PortfolioValidator
 
 # Logging
 logger = logging.getLogger("agents.orchestrator")

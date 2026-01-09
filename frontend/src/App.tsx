@@ -3,6 +3,8 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+
+// Existing Page Imports
 import Index from "./pages/Index";
 import Templates from "./pages/Templates";
 import Changelog from "./pages/Changelog";
@@ -15,6 +17,11 @@ import Discover from "./pages/Discover";
 import Enterprise from "./pages/Enterprise";
 import Editor from "./pages/Editor";
 import NotFound from "./pages/NotFound";
+import GitHubCallback from "./pages/auth/github/callback";
+
+// 🛡️ New Auth Imports
+import Login from "./pages/Login";
+import { ProtectedRoute } from "./components/ProtectedRoute.tsx";
 
 const queryClient = new QueryClient();
 
@@ -25,7 +32,9 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <Routes>
+          {/* 🌏 Public Routes */}
           <Route path="/" element={<Index />} />
+          <Route path="/login" element={<Login />} />
           <Route path="/templates" element={<Templates />} />
           <Route path="/changelog" element={<Changelog />} />
           <Route path="/pricing" element={<Pricing />} />
@@ -35,7 +44,19 @@ const App = () => (
           <Route path="/community" element={<Community />} />
           <Route path="/discover" element={<Discover />} />
           <Route path="/enterprise" element={<Enterprise />} />
-          <Route path="/editor" element={<Editor />} />
+          {/* GitHub OAuth callback route */}
+          <Route path="/auth/github/callback" element={<GitHubCallback />} />
+
+          {/* 🔐 Protected Routes (Require Login) */}
+          {/* We protect the Editor route as it's the core AI feature */}
+          <Route
+            path="/editor"
+            element={
+              <ProtectedRoute>
+                <Editor />
+              </ProtectedRoute>
+            }
+          />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

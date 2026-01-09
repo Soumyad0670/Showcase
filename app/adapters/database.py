@@ -1,100 +1,71 @@
 # app/adapters/database.py
 
-from typing import AsyncGenerator
 import logging
+from typing import Generator
 
-from sqlalchemy.ext.asyncio import (
-    AsyncSession,
-    create_async_engine,
-    async_sessionmaker,
-)
-from sqlalchemy.orm import DeclarativeBase
+from sqlmodel import Session, create_engine
+# from sqlalchemy.orm import sessionmaker, DeclarativeBase, Session # Removed Session override
+from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
 
-
 logger = logging.getLogger(__name__)
-
 
 # Declarative Base (shared by all ORM models)
 class Base(DeclarativeBase):
-
-    """
-    Base class for all SQLAlchemy ORM models.
-
-    All models across the application MUST inherit from this Base.
-    Alembic will also reference this Base for migrations.
-    """
-
     pass
 
 try:
-    engine = create_async_engine(
+    engine = create_engine(
         settings.DATABASE_URL,
-        echo=settings.DEBUG,      # SQL echo only in development
-        pool_pre_ping=True,       # Detect dropped connections
-        pool_size=10,             # Sensible default
-        max_overflow=20,          # Burst handling
+        echo=settings.DEBUG,
+        pool_pre_ping=True,
+        pool_size=10,
+        max_overflow=20,
         future=True,
     )
 
 except Exception as exc:
-    logger.critical("Failed to create database engine")
-    raise RuntimeError("Database engine initialization failed") from exc
+    # If SQLite, might fail with pool arguments? SQLite doesn't support pool_size?
+    # Retrying without pool args just in case or assume PostgreSQL for prod
+    if "sqlite" in settings.DATABASE_URL:
+         engine = create_engine(
+            settings.DATABASE_URL,
+            echo=settings.DEBUG,
+            connect_args={"check_same_thread": False},
+        )
+    else:
+        raise
 
-
-# Session Generator
-AsyncSessionLocal = async_sessionmaker(
+# Session Factory
+SessionLocal = sessionmaker(
     bind=engine,
-    class_=AsyncSession,
+    class_=Session,
     expire_on_commit=False,
     autoflush=False,
     autocommit=False,
 )
 
-
 # Session Dependency / Provider
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-
+def get_db() -> Generator[Session, None, None]:
     """
-    Provides a scoped async database session.
-
-    This function is intended to be used as:
-    - FastAPI dependency
-    - Service-level session provider
-    - Background task session provider
-
-    It guarantees:
-    - One session per request/task
-    - Proper cleanup
-    - No connection leaks
+    Provides a scoped database session.
     """
-
-    session: AsyncSession = AsyncSessionLocal()
-
+    session = SessionLocal()
     try:
         yield session
-        await session.commit()
-
-    except SQLAlchemyError as exc:
-        await session.rollback()
+        session.commit()
+    except SQLAlchemyError:
+        session.rollback()
         logger.exception("Database transaction failed")
         raise
-
     finally:
-        await session.close()
+        session.close()
 
-
-
-async def close_engine() -> None:
-    """
-    Gracefully dispose the database engine.
-
-    Call this during application shutdown if needed.
-    """
+def close_engine() -> None:
     try:
-        await engine.dispose()
+        engine.dispose()
         logger.info("Database engine disposed successfully")
-    except Exception as exc:
+    except Exception:
         logger.exception("Error while disposing database engine")

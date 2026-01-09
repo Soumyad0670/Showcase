@@ -2,35 +2,31 @@
 SCHEMA_BUILDER.PY - Portfolio Schema Construction Agent
 
 Transforms parsed resume data into structured portfolio schema.
-Converted to Agno Agent pattern.
 """
 
-from agno.agent import Agent
-from agno.run import RunContext
 import logging
+from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
 
-class SchemaBuilderAgent(Agent):
+class SchemaBuilder:
     """
-    Agno Agent that builds portfolio schema from LLM-extracted profile data.
+    Builds portfolio schema from preprocessed profile data.
 
-    INPUT (ctx.state):
+    INPUT:
         - profile: dict with name, role, skills, experience_years, projects
 
     OUTPUT:
-        - returns schema
-        - also stores schema in ctx.state["schema"]
+        - schema: dict with sections and layout hints
     """
 
-    name = "schema_builder_agent"
-
-    async def run(self, ctx: RunContext):
-        profile = ctx.state.get("profile")
-
+    async def build_schema(self, profile: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Builds the complete portfolio schema.
+        """
         if not profile or not isinstance(profile, dict):
-            raise ValueError("SchemaBuilderAgent: `profile` missing or invalid in ctx.state")
+            raise ValueError("SchemaBuilder: `profile` must be a non-empty dictionary")
 
         logger.info(
             "Building schema for profile: %s",
@@ -51,10 +47,7 @@ class SchemaBuilderAgent(Agent):
             },
         }
 
-        ctx.state["schema"] = schema
         logger.info("Schema built successfully")
-
-        # IMPORTANT: explicit return for agent chaining
         return schema
 
     def _build_profile_summary(self, profile: dict) -> dict:
@@ -89,7 +82,7 @@ class SchemaBuilderAgent(Agent):
             bio_points.append(f"Role: {profile['role']}")
 
         exp = profile.get("experience_years")
-        if isinstance(exp, int) and exp > 0:
+        if isinstance(exp, (int, str)) and str(exp).isdigit() and int(exp) > 0:
             bio_points.append(f"Experience: {exp} years")
 
         skills = profile.get("skills")
@@ -149,7 +142,7 @@ class SchemaBuilderAgent(Agent):
         }
 
         for skill in skills:
-            s = skill.lower()
+            s = str(skill).lower()
             if any(x in s for x in ["python", "javascript", "java", "c++", "go", "rust"]):
                 categories["languages"].append(skill)
             elif any(x in s for x in ["react", "vue", "angular", "django", "flask", "spring"]):
@@ -172,7 +165,12 @@ class SchemaBuilderAgent(Agent):
             sections.insert(2, "projects")
 
         exp = profile.get("experience_years", 0)
-        density = "detailed" if isinstance(exp, int) and exp >= 5 else "balanced"
+        try:
+             exp_val = int(exp)
+        except (ValueError, TypeError):
+             exp_val = 0
+
+        density = "detailed" if exp_val >= 5 else "balanced"
 
         return {
             "sections": sections,

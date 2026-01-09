@@ -221,3 +221,24 @@ class ValidationAgent:
             warnings.append("Generated more projects than provided")
 
         return warnings
+
+    async def validate_and_enhance(
+        self, generated_content: Dict[str, Any], original_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Adapter method for Orchestrator compatibility.
+        """
+        state = {
+            "generated_content": generated_content,
+            "clean_data": original_data,
+        }
+        
+        # Reuse existing run logic
+        try:
+            await self.run(state)
+        except ValidationError:
+            if self.strict:
+                raise
+            # If not strict, we continue but mark valid=False inside run()
+            
+        return generated_content

@@ -33,3 +33,7 @@ class PortfolioOutput(BaseModel):
     # Metadata for the system
     quality_score: float = Field(..., ge=0, le=1.0)
     generated_at: str
+
+class PortfolioUpdate(BaseModel):
+    is_published: Optional[bool] = None
+    deployed_url: Optional[str] = None

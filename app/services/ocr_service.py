@@ -1,4 +1,4 @@
-from app.adapters.gemini_adapter import gemini_adapter
+from app.adapters.gemini_adapter import GeminiAdapter
 from fastapi import UploadFile, HTTPException
 
 MAX_FILE_SIZE = 5 * 1024 * 1024  
@@ -15,7 +15,7 @@ class OCRService:
             if len(content) > MAX_FILE_SIZE:
                 raise ValueError("File size exceeds the 5MB limit")
 
-            return await gemini_adapter.vision_to_text(content)
+            return await gemini_adapter.vision_to_text(content, mime_type=file.content_type)
 
         except ValueError as ve:
             raise HTTPException(status_code=400, detail=str(ve))
