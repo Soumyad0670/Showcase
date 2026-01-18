@@ -1,15 +1,53 @@
-import { Paperclip, Palette, MessageSquare, ArrowUp, AudioLines } from "lucide-react";
-import { useState } from "react";
+import { Paperclip, Palette, MessageSquare, ArrowUp, AudioLines, X, Loader2 } from "lucide-react";
+import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import axios from "axios";
 
 export const Hero = () => {
   const [prompt, setPrompt] = useState("");
   const [isFocused, setIsFocused] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
-  const handleSubmit = () => {
-    if (prompt.trim()) {
-      navigate(`/editor?prompt=${encodeURIComponent(prompt)}`);
+  const handleSubmit = async () => {
+    if (!prompt.trim() && !file) return;
+
+    try {
+      let jobId = null;
+
+      // 1. If file attached, upload it first
+      if (file) {
+        setIsUploading(true);
+        const formData = new FormData();
+        formData.append("file", file);
+
+        // Using direct URL as per user context (adjust if proxy exists)
+        const response = await axios.post("http://localhost:8000/api/v1/resume/upload", formData, {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          }
+        });
+
+        jobId = response.data.job_id;
+        toast.success("Resume uploaded successfully!");
+      }
+
+      // 2. Navigate to editor with context
+      const params = new URLSearchParams();
+      if (prompt.trim()) params.set("prompt", prompt);
+      if (jobId) params.set("jobId", jobId);
+      if (file) params.set("fileName", file.name); // Keep for UI reference
+
+      navigate(`/editor?${params.toString()}`);
+
+    } catch (error) {
+      console.error("Upload failed", error);
+      toast.error("Failed to upload resume. Please try again.");
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -18,6 +56,28 @@ export const Hero = () => {
       e.preventDefault();
       handleSubmit();
     }
+  };
+
+  const handleAttachClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const selectedFile = e.target.files[0];
+      // Basic validation
+      if (selectedFile.type === "application/pdf" || selectedFile.type.startsWith("image/")) {
+        setFile(selectedFile);
+        toast.success(`Attached ${selectedFile.name}`);
+      } else {
+        toast.error("Please upload a PDF or Image file");
+      }
+    }
+  };
+
+  const removeFile = () => {
+    setFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   return (
@@ -34,7 +94,7 @@ export const Hero = () => {
         <h1 className="text-5xl md:text-7xl font-bold mb-6">
           Build something <span className="text-gradient">Showcase</span>
         </h1>
-        
+
         {/* Subheading */}
         <p className="text-lg md:text-xl text-muted-foreground mb-12 max-w-2xl mx-auto">
           Create apps and websites by chatting with AI
@@ -46,6 +106,15 @@ export const Hero = () => {
             <div className="bg-obsidian-light rounded-xl p-4">
               {/* Input area */}
               <div className="min-h-[80px] mb-4">
+                {file && (
+                  <div className="flex items-center gap-2 mb-2 bg-obsidian-lighter w-fit px-3 py-1 rounded-full border border-border/50">
+                    <Paperclip className="h-3 w-3 text-primary" />
+                    <span className="text-xs text-foreground/80">{file.name}</span>
+                    <button onClick={removeFile} className="hover:text-destructive transition-colors">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                )}
                 <textarea
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
@@ -64,7 +133,19 @@ export const Hero = () => {
                   <button className="p-2 rounded-lg hover:bg-obsidian-lighter transition-colors text-muted-foreground hover:text-foreground">
                     <span className="text-lg">+</span>
                   </button>
-                  <button className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-obsidian-lighter transition-colors text-muted-foreground hover:text-foreground">
+
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    className="hidden"
+                    accept=".pdf,image/*"
+                    onChange={handleFileChange}
+                  />
+
+                  <button
+                    onClick={handleAttachClick}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-obsidian-lighter transition-colors ${file ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
                     <Paperclip className="h-4 w-4" />
                     <span className="text-sm hidden sm:inline">Attach</span>
                   </button>
@@ -82,12 +163,12 @@ export const Hero = () => {
                   <button className="p-2 rounded-lg hover:bg-obsidian-lighter transition-colors text-muted-foreground hover:text-foreground">
                     <AudioLines className="h-4 w-4" />
                   </button>
-                  <button 
+                  <button
                     onClick={handleSubmit}
-                    disabled={!prompt.trim()}
+                    disabled={(!prompt.trim() && !file) || isUploading}
                     className="p-2 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <ArrowUp className="h-4 w-4" />
+                    {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
                   </button>
                 </div>
               </div>

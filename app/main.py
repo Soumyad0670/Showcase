@@ -12,59 +12,37 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app import chat
-from app.adapters.gemini_adapter import GeminiAdapter
 from app.api.routes import api_router
 from app.core.config import settings
-from app.adapters.database import engine, Base
-from app.models.portfolio import Portfolio
-from app.models.chat_message import ChatMessage 
 from app.adapters.database import engine
 from app.models.portfolio import Portfolio
-from app.models.user import User  # GitHub OAuth user model
+from app.models.chat_message import ChatMessage
+from app.models.user import User
+from app.models.job import Job
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     Application lifespan handler.
-    Startup:
-    - Create database tables (DEV MODE)
-    - Initialize Gemini adapter for chat
-    Shutdown:
-    - Close Gemini adapter
-    - Dispose database engine
+    Creates database tables on startup (development only).
+    In production, use Alembic migrations instead.
     """
+    logger.info("Showcase AI: Application starting up")
     
-    logger.info("🚀 Showcase AI: Application starting up")
-    
-    # Create database tables
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("✅ Database tables created")
-    
-    # Initialize Gemini adapter for chat
-    chat.gemini_adapter = GeminiAdapter(
-        api_key=settings.GEMINI_API_KEY,
-        model_name=settings.GEMINI_AGENT_MODEL,
-        timeout_seconds=60,
-        max_retries=3,
-    )
-    logger.info("✅ Gemini adapter initialized")
+    # Create tables (only for development)
+    # In production, use: alembic upgrade head
+    if settings.DEBUG:
+        from sqlmodel import SQLModel
+        SQLModel.metadata.create_all(engine)
+        logger.info("Database tables created (development mode)")
     
     yield
     
-    # Shutdown: Clean up resources
-    logger.info("🛑 Showcase AI: Application shutting down")
-    
-    # Close Gemini adapter
-    if chat.gemini_adapter:
-        await chat.gemini_adapter.close()
-        logger.info("Gemini adapter closed")
-    
-    # Dispose database engine
-    await engine.dispose()
-    logger.info("Database engine disposed")
+    logger.info("Showcase AI: Application shutting down")
+    engine.dispose()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -73,14 +51,18 @@ app = FastAPI(
     debug=settings.DEBUG,
     lifespan=lifespan,
 )
-# CORS middleware
+
+# CORS middleware configuration
+# In production, replace ["*"] with specific allowed origins
+cors_origins = settings.BACKEND_CORS_ORIGINS if settings.BACKEND_CORS_ORIGINS else ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[str(origin) for origin in settings.BACKEND_CORS_ORIGINS],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 # Register routers
 app.include_router(chat.router, prefix="/chat", tags=["chat"])
 app.include_router(api_router, prefix=settings.API_V1_STR)

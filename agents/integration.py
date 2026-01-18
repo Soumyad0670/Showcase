@@ -15,7 +15,7 @@ import asyncio
 import logging
 from typing import Any, Dict, Optional, Tuple
 
-from agents.orchestrator import get_orchestrator, PortfolioOrchestrator
+from agents.orchestrator.orchestrator_agent import get_orchestrator, PortfolioOrchestrator
 
 # Logging
 
@@ -92,7 +92,8 @@ async def generate_portfolio(
     try:
         logger.info("Starting portfolio generation")
 
-        orchestrator: PortfolioOrchestrator = get_orchestrator(config)
+        # FIX: await get_orchestrator
+        orchestrator: PortfolioOrchestrator = await get_orchestrator(config)
         portfolio = await orchestrator.process_resume(parsed_data)
 
         logger.info("Portfolio generation completed successfully")
@@ -125,7 +126,8 @@ async def regenerate_section(
     try:
         logger.info("Regenerating section: %s", section)
 
-        orchestrator: PortfolioOrchestrator = get_orchestrator(config)
+        # FIX: await get_orchestrator
+        orchestrator: PortfolioOrchestrator = await get_orchestrator(config)
         updated_portfolio = await orchestrator.regenerate_section(
             current_portfolio=current_portfolio,
             section=section,
@@ -159,7 +161,8 @@ async def export_portfolio(
         raise ValidationError(f"Unsupported export format: {format}")
 
     try:
-        orchestrator: PortfolioOrchestrator = get_orchestrator(config)
+        # FIX: await get_orchestrator
+        orchestrator: PortfolioOrchestrator = await get_orchestrator(config)
         output = await orchestrator.export_portfolio(portfolio, format)
 
         logger.info("Portfolio exported as %s", format)

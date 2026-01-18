@@ -16,9 +16,9 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 
 from agents.middleware.data_preprocessor import DataPreprocessor
-from agents.core.schema_builder import SchemaBuilderAgent
-from agents.generation.generation_agent import GenerationAgent
-from agents.validation.validation_agent import PortfolioValidator
+from agents.core.schema_builder import SchemaBuilder
+from agents.generation.generation_agent import ContentGenerator
+from agents.validation.validation_agent import ValidationAgent as PortfolioValidator
 
 logger = logging.getLogger("agents.orchestrator")
 logger.setLevel(logging.INFO)

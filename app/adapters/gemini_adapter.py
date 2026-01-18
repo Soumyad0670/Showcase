@@ -29,6 +29,8 @@ import asyncio
 import logging
 import httpx
 from typing import Optional
+import google.genai as genai
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -58,20 +60,8 @@ class GeminiRateLimitError(GeminiError):
 
 class GeminiAdapter:
     """
-    Infrastructure adapter for Google Gemini (REST API).
-
-    Responsibilities:
-    - Send prompts to Gemini
-    - Handle retries, timeouts, rate limits
-    - Normalize responses
-    - Return raw generated text
-
-    This class MUST NOT:
-    - Perform prompt engineering
-    - Contain business logic
-    - Know about agents or FastAPI
+    Infrastructure adapter for Google Gemini.
     """
-
 
     GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
@@ -81,13 +71,17 @@ class GeminiAdapter:
                 model_name: str = "gemini-pro",
                 timeout_seconds: int = 30,
                 max_retries: int = 3,
+                vision_model_name: str = "gemini-1.5-flash"
                 ) -> None:
         
         if not api_key:
             raise ValueError("Gemini API key is required")
 
         self.api_key = api_key
-        self.model_name = model_name
+        # Use newer model default
+        self.api_key = api_key
+        # Use newer model default if not specified
+        self.model_name = "gemini-1.5-flash" if model_name == "gemini-pro" else model_name
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
 
@@ -96,6 +90,11 @@ class GeminiAdapter:
         )
         
         self._client = httpx.AsyncClient(timeout=timeout_seconds)
+
+        # Initialize SDK for Vision (Hybrid approach)
+        # New google.genai API uses Client instead of configure
+        self.genai_client = genai.Client(api_key=api_key)
+        self.vision_model_name = vision_model_name
 
 
     async def close(self) -> None:
@@ -111,20 +110,6 @@ class GeminiAdapter:
         
         """
         Send a prompt to Gemini and return generated text.
-
-        Args:
-            prompt: Text prompt for generation
-            temperature: Sampling temperature (0.0-1.0)
-            max_tokens: Maximum tokens to generate
-
-        Returns:
-            Generated text as string
-
-        Raises:
-            GeminiAPIError: API request failed
-            GeminiResponseParseError: Response structure invalid
-            GeminiEmptyResponseError: Empty response received
-            GeminiRateLimitError: Rate limit exceeded
         """
 
         last_exception: Optional[Exception] = None
@@ -188,12 +173,6 @@ class GeminiAdapter:
 
         """
         Low-level Gemini REST API call.
-
-        Responsibilities:
-        - Build request payload
-        - Send HTTP request
-        - Extract generated text
-        - Raise typed errors
         """
 
         payload = {
@@ -257,17 +236,6 @@ class GeminiAdapter:
 
         """
         Extract generated text from Gemini response.
-
-        Expected response structure:
-        {
-          "candidates": [
-            {
-              "content": {
-                "parts": [{"text": "..."}]
-              }
-            }
-          ]
-        }
         """
         
         # Check for error in the response
@@ -317,23 +285,147 @@ class GeminiAdapter:
         
 
 
-
     #Vision model for OCR if needed
-    async def vision_to_text(self, image_bytes: bytes, prompt: Optional[str] = None) -> str:
+    async def vision_to_text(self, image_bytes: bytes, mime_type: str = "image/jpeg", prompt: Optional[str] = None) -> str:
         """
-        Optional OCR capability.
-        Only used if vision functionality is explicitly required.
+        Extract text from images or PDFs using Gemini Vision API.
+        
+        Args:
+            image_bytes: File content as bytes
+            mime_type: MIME type of the file (image/jpeg, image/png, application/pdf)
+            prompt: Optional custom prompt for extraction
+        
+        Returns:
+            Extracted text as string
+        
+        Raises:
+            GeminiError: If extraction fails
         """
+        # Use optimized prompt based on file type
         if not prompt:
-            prompt = "Extract all text from this image and maintain the formatting."
+            if mime_type == "application/pdf":
+                prompt = (
+                    "Extract all text from this PDF document. "
+                    "Maintain the structure and formatting. "
+                    "Include all sections, headings, bullet points, and content. "
+                    "If the document is a resume, extract all personal information, "
+                    "work experience, education, and skills."
+                )
+            else:
+                prompt = (
+                    "Extract all text from this image. "
+                    "Maintain the formatting and structure. "
+                    "Include all visible text, numbers, and symbols."
+                )
 
         try:
-            # Using the SDK's native async call
-            response = await self.vision_model.generate_content_async(
-                [prompt, {'mime_type': 'image/jpeg', 'data': image_bytes}]
+            logger.debug(
+                f"Calling Gemini Vision API for OCR: "
+                f"mime_type={mime_type}, size={len(image_bytes)} bytes"
             )
-            return response.text.strip() if response.text else ""
+            
+            # Using the new google.genai API
+            # Content format for new API
+            from google.genai import types
+            
+            # Create content parts
+            parts = [
+                types.Part.from_text(prompt),
+                types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+            ]
+            
+            # Call Gemini Vision API with timeout handling
+            try:
+                logger.info(
+                    f"Calling Gemini Vision API: model={self.vision_model_name}, "
+                    f"parts_count={len(parts)}, timeout={self.timeout_seconds}s"
+                )
+                
+                response = await asyncio.wait_for(
+                    self.genai_client.aio.models.generate_content(
+                        model=self.vision_model_name,
+                        contents=parts
+                    ),
+                    timeout=self.timeout_seconds
+                )
+                
+                logger.info(f"Gemini Vision API call completed successfully")
+                
+            except asyncio.TimeoutError:
+                logger.error(
+                    f"OCR request timed out after {self.timeout_seconds} seconds. "
+                    f"File size: {len(image_bytes)} bytes, MIME type: {mime_type}"
+                )
+                raise GeminiError(
+                    f"OCR request timed out after {self.timeout_seconds} seconds. "
+                    "The file may be too large or complex."
+                )
+            except Exception as api_error:
+                logger.error(
+                    f"Gemini Vision API call failed: {type(api_error).__name__}: {str(api_error)}",
+                    exc_info=True
+                )
+                raise GeminiError(
+                    f"OCR API call failed: {str(api_error)}"
+                ) from api_error
+            
+            # Extract text from response
+            if not response:
+                raise GeminiEmptyResponseError("Gemini Vision returned no response")
+            
+            # New API structure: response.candidates[0].content.parts[0].text
+            if not hasattr(response, 'candidates') or not response.candidates:
+                raise GeminiEmptyResponseError("Gemini Vision returned no candidates")
+            
+            candidate = response.candidates[0]
+            if not hasattr(candidate, 'content') or not candidate.content:
+                raise GeminiEmptyResponseError("Gemini Vision returned empty content")
+            
+            if not hasattr(candidate.content, 'parts') or not candidate.content.parts:
+                raise GeminiEmptyResponseError("Gemini Vision returned no parts")
+            
+            # Get text from first part
+            text_part = candidate.content.parts[0]
+            if not hasattr(text_part, 'text') or not text_part.text:
+                raise GeminiEmptyResponseError("Gemini Vision returned empty text")
+            
+            extracted_text = text_part.text.strip()
+            
+            if not extracted_text:
+                raise GeminiEmptyResponseError(
+                    "No text was extracted. The file may contain only images without text."
+                )
+            
+            logger.info(f"Successfully extracted {len(extracted_text)} characters via OCR")
+            return extracted_text
+            
+        except GeminiError:
+            # Re-raise our typed errors
+            raise
         except Exception as e:
-            logger.error(f"Vision OCR failed: {e}")
-            # We raise a standard error so the rest of the app handles it gracefully
-            raise GeminiError(f"OCR failed: {str(e)}")
+            error_msg = str(e)
+            logger.error(f"Vision OCR failed: {error_msg}", exc_info=True)
+            
+            # Provide more specific error messages
+            if "quota" in error_msg.lower() or "limit" in error_msg.lower():
+                raise GeminiError(
+                    "OCR service quota exceeded. Please try again later."
+                ) from e
+            elif "timeout" in error_msg.lower():
+                raise GeminiError(
+                    "OCR request timed out. The file may be too large. "
+                    "Please try a smaller file or split the document."
+                ) from e
+            elif "invalid" in error_msg.lower() or "format" in error_msg.lower():
+                raise GeminiError(
+                    f"Invalid file format for OCR: {error_msg}"
+                ) from e
+            else:
+                raise GeminiError(f"OCR failed: {error_msg}") from e
+
+# Instantiate Singleton
+gemini_adapter = GeminiAdapter(
+    api_key=settings.GEMINI_API_KEY,
+    model_name=settings.GEMINI_AGENT_MODEL,
+    vision_model_name=settings.GEMINI_VISION_MODEL
+)

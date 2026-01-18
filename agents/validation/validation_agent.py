@@ -136,3 +136,48 @@ class PortfolioValidator:
     def _is_repetitive(self, text: str) -> bool:
         sentences = [s.strip().lower() for s in text.split(".") if s.strip()]
         return len(sentences) != len(set(sentences))
+
+    def _check_consistency(
+        self, portfolio: Dict[str, Any], original: Dict[str, Any]
+    ) -> List[str]:
+        warnings = []
+
+        if portfolio.get("hero", {}).get("name") != original.get("name"):
+            warnings.append("Hero name does not match original data")
+
+        original_skills = set(s.lower() for s in original.get("skills", []))
+        bio = portfolio.get("bio", "").lower()
+
+        hallucinated = [
+            word for word in re.findall(r"\b[a-zA-Z]{4,}\b", bio)
+            if word not in original_skills
+        ]
+
+        if len(hallucinated) > 15:
+            warnings.append("Possible skill hallucination in bio")
+
+        if len(portfolio.get("projects", [])) > len(original.get("projects", [])):
+            warnings.append("Generated more projects than provided")
+
+        return warnings
+
+    async def validate_and_enhance(
+        self, generated_content: Dict[str, Any], original_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Adapter method for Orchestrator compatibility.
+        """
+        state = {
+            "generated_content": generated_content,
+            "clean_data": original_data,
+        }
+        
+        # Reuse existing run logic
+        try:
+            await self.run(state)
+        except ValidationError:
+            if self.strict:
+                raise
+            # If not strict, we continue but mark valid=False inside run()
+            
+        return generated_content
