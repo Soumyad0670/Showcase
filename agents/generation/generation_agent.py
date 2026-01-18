@@ -78,299 +78,28 @@ class ContentValidationError(GenerationError):
     """Raised when generated content fails validation."""
     pass
 
+import os
+import json
+import asyncio
+from datetime import datetime
+from typing import Dict, Any, List
 
-class ToneStyle(str, Enum):
-    """Available tone styles for content generation."""
-    PROFESSIONAL = "professional"
-    CASUAL = "casual"
-    TECHNICAL = "technical"
-    CREATIVE = "creative"
-    EXECUTIVE = "executive"
-    FRIENDLY = "friendly"
+import google.generativeai as genai
+from pydantic import ValidationError
 
-
-class EmphasisType(str, Enum):
-    """Content emphasis types."""
-    BALANCED = "balanced"
-    TECHNICAL = "technical"
-    LEADERSHIP = "leadership"
-    IMPACT = "impact"
-    CREATIVE = "creative"
-    PROBLEM_SOLVING = "problem_solving"
+from agents.schemas.portfolio import PortfolioOutput
 
 
-@dataclass
-class GenerationConfig:
-    """Configuration for content generation."""
-    
-    # Model settings
-    model_name: str = "gemini-1.5-pro"
-    temperature: float = 0.7
-    top_p: float = 0.9
-    top_k: int = 40
-    max_output_tokens: int = 2048
-    
-    # Content settings
-    hero_min_words: int = 8
-    hero_max_words: int = 15
-    bio_min_words: int = 150
-    bio_max_words: int = 200
-    project_desc_min_words: int = 80
-    project_desc_max_words: int = 150
-    
-    # Retry settings
-    max_retries: int = 3
-    retry_min_wait: int = 1
-    retry_max_wait: int = 10
-    
-    # Timeout settings
-    generation_timeout: float = 30.0
-    
-    # Cache settings
-    enable_cache: bool = True
-    cache_ttl: int = 3600  # 1 hour
-    
-    # Rate limiting
-    requests_per_minute: int = 60
-    
-    # Safety settings
-    block_none_harmful: bool = True
-    
-    # Quality thresholds
-    min_content_quality: float = 0.6
+class GenerationAgent:
+    """
+    Transforms SchemaBuilderAgent output into final portfolio content.
 
+    Input:
+      - schema: structured semantic schema from SchemaBuilderAgent
+      - profile: original normalized profile data
 
-@dataclass
-class CacheEntry:
-    """Cache entry for generated content."""
-    content: Any
-    timestamp: datetime
-    hits: int = 0
-
-
-class ContentValidator:
-    """Validates generated content quality and format."""
-    
-    @staticmethod
-    def validate_hero_tagline(tagline: str, config: GenerationConfig) -> bool:
-        """Validate hero tagline meets requirements."""
-        if not tagline or not isinstance(tagline, str):
-            return False
-        
-        # Remove quotes if present
-        tagline = tagline.strip().strip('"\'')
-        
-        # Check word count
-        word_count = len(tagline.split())
-        if word_count < config.hero_min_words or word_count > config.hero_max_words:
-            logger.warning(
-                f"Tagline word count {word_count} outside range "
-                f"[{config.hero_min_words}, {config.hero_max_words}]"
-            )
-            return False
-        
-        # Check length
-        if len(tagline) < 20 or len(tagline) > 150:
-            return False
-        
-        # Check for common issues
-        if tagline.lower().startswith(('here is', 'here\'s', 'the tagline')):
-            return False
-        
-        return True
-    
-    @staticmethod
-    def validate_bio(bio: str, config: GenerationConfig) -> bool:
-        """Validate bio meets requirements."""
-        if not bio or not isinstance(bio, str):
-            return False
-        
-        # Check word count
-        word_count = len(bio.split())
-        if word_count < config.bio_min_words or word_count > config.bio_max_words * 1.2:
-            logger.warning(
-                f"Bio word count {word_count} outside acceptable range "
-                f"[{config.bio_min_words}, {config.bio_max_words * 1.2}]"
-            )
-            return False
-        
-        # Check for common issues
-        if bio.lower().startswith(('here is', 'here\'s', 'the bio', 'this bio')):
-            return False
-        
-        # Should have multiple sentences
-        if bio.count('.') < 3:
-            return False
-        
-        return True
-    
-    @staticmethod
-    def validate_project_description(
-        description: str,
-        config: GenerationConfig
-    ) -> bool:
-        """Validate project description meets requirements."""
-        if not description or not isinstance(description, str):
-            return False
-        
-        # Check word count
-        word_count = len(description.split())
-        if word_count < config.project_desc_min_words * 0.8:
-            logger.warning(f"Project description too short: {word_count} words")
-            return False
-        
-        # Check for common issues
-        if description.lower().startswith(('here is', 'here\'s', 'the description')):
-            return False
-        
-        return True
-    
-    @staticmethod
-    def calculate_quality_score(content: str, content_type: str) -> float:
-        """Calculate quality score for generated content."""
-        if not content:
-            return 0.0
-        
-        score = 0.0
-        
-        # Length check (30%)
-        word_count = len(content.split())
-        if content_type == 'hero':
-            if 8 <= word_count <= 15:
-                score += 0.3
-        elif content_type == 'bio':
-            if 150 <= word_count <= 250:
-                score += 0.3
-        elif content_type == 'project':
-            if 80 <= word_count <= 180:
-                score += 0.3
-        
-        # Sentence structure (20%)
-        sentences = [s.strip() for s in content.split('.') if s.strip()]
-        if len(sentences) >= 2:
-            score += 0.2
-        
-        # Diversity (20%)
-        words = content.lower().split()
-        unique_ratio = len(set(words)) / len(words) if words else 0
-        score += unique_ratio * 0.2
-        
-        # No filler phrases (30%)
-        filler_phrases = [
-            'here is', 'here\'s', 'the following', 'as follows',
-            'this is', 'let me', 'i will'
-        ]
-        has_filler = any(phrase in content.lower() for phrase in filler_phrases)
-        if not has_filler:
-            score += 0.3
-        
-        return min(1.0, score)
-
-
-class RateLimiter:
-    """Simple rate limiter for API calls."""
-    
-    def __init__(self, requests_per_minute: int):
-        self.requests_per_minute = requests_per_minute
-        self.requests: List[datetime] = []
-        self._lock = asyncio.Lock()
-    
-    async def acquire(self):
-        """Acquire permission to make a request."""
-        async with self._lock:
-            now = datetime.utcnow()
-            
-            # Remove requests older than 1 minute
-            self.requests = [
-                req_time for req_time in self.requests
-                if now - req_time < timedelta(minutes=1)
-            ]
-            
-            # Check if we can make a request
-            if len(self.requests) >= self.requests_per_minute:
-                # Calculate wait time
-                oldest = self.requests[0]
-                wait_time = 60 - (now - oldest).total_seconds()
-                
-                if wait_time > 0:
-                    logger.warning(
-                        f"Rate limit reached, waiting {wait_time:.2f}s"
-                    )
-                    raise RateLimitError(
-                        f"Rate limit exceeded. Wait {wait_time:.2f}s"
-                    )
-            
-            # Add this request
-            self.requests.append(now)
-
-
-class ContentCache:
-    """Simple in-memory cache for generated content."""
-    
-    def __init__(self, ttl: int = 3600):
-        self.ttl = ttl
-        self.cache: Dict[str, CacheEntry] = {}
-        self._lock = asyncio.Lock()
-    
-    def _generate_key(self, *args, **kwargs) -> str:
-        """Generate cache key from arguments."""
-        key_data = json.dumps(
-            {'args': args, 'kwargs': kwargs},
-            sort_keys=True,
-            default=str
-        )
-        return hashlib.md5(key_data.encode()).hexdigest()
-    
-    async def get(self, key: str) -> Optional[Any]:
-        """Get cached content."""
-        async with self._lock:
-            if key not in self.cache:
-                return None
-            
-            entry = self.cache[key]
-            
-            # Check if expired
-            if datetime.utcnow() - entry.timestamp > timedelta(seconds=self.ttl):
-                del self.cache[key]
-                return None
-            
-            # Update hits
-            entry.hits += 1
-            
-            return entry.content
-    
-    async def set(self, key: str, content: Any):
-        """Set cached content."""
-        async with self._lock:
-            self.cache[key] = CacheEntry(
-                content=content,
-                timestamp=datetime.utcnow()
-            )
-    
-    async def clear(self):
-        """Clear all cache."""
-        async with self._lock:
-            self.cache.clear()
-    
-    async def get_stats(self) -> Dict[str, Any]:
-        """Get cache statistics."""
-        async with self._lock:
-            total_hits = sum(entry.hits for entry in self.cache.values())
-            return {
-                'size': len(self.cache),
-                'total_hits': total_hits,
-                'entries': [
-                    {
-                        'key': key[:16] + '...',
-                        'hits': entry.hits,
-                        'age_seconds': (datetime.utcnow() - entry.timestamp).total_seconds()
-                    }
-                    for key, entry in list(self.cache.items())[:10]
-                ]
-            }
-
-
-class ContentGenerator:
+    Output:
+      - PortfolioOutput (validated, render-ready)
     """
     Production-ready AI-powered content generator using Google Gemini.
     
@@ -711,15 +440,13 @@ Context:
 - Number of projects: {len(projects)}
 - Desired tone: {tone}
 
-Requirements:
-- Exactly {self.config.hero_min_words}-{self.config.hero_max_words} words
-- Impactful and memorable
-- Specific to their expertise in {domain.replace('_', ' ')}
-- NO clichés like "passionate", "problem solver", "innovative"
-- Action-oriented with strong verbs
-- NO introductory phrases like "Here is" or "The tagline"
+    def __init__(self, model: str = "gemini-1.5-pro"):
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise RuntimeError("GEMINI_API_KEY not set")
 
-Template inspiration: {hero_schema.get('template', 'Professional with expertise in domain')}
+        genai.configure(api_key=api_key)
+        self.model = genai.GenerativeModel(model)
 
 Return ONLY the tagline text, nothing else."""
         
@@ -856,55 +583,21 @@ Return ONLY the tagline text, nothing else."""
     )
     async def _generate_bio(
         self,
-        bio_schema: Dict[str, Any],
-        user_data: Dict[str, Any],
-        domain: str,
-        preferences: Dict[str, Any]
-    ) -> str:
-        """Generate professional bio following the schema structure."""
-        
-        # Rate limiting
-        await self.rate_limiter.acquire()
-        
-        key_points = bio_schema.get('key_points', [])
-        tone = preferences.get('tone', ToneStyle.PROFESSIONAL.value)
-        emphasis = preferences.get('emphasis', EmphasisType.BALANCED.value)
-        
-        # Build context from user data
-        skills_context = ', '.join(user_data.get('skills', [])[:7])
-        projects_count = len(user_data.get('projects', []))
-        experience_count = len(user_data.get('experience', []))
-        
-        prompt = f"""Write a professional bio for a {domain.replace('_', ' ')}'s portfolio.
+        schema: Dict[str, Any],
+        profile: Dict[str, Any],
+    ) -> PortfolioOutput:
+        prompt = self._build_prompt(schema, profile)
 
-Context:
-{chr(10).join(f'- {point}' for point in key_points) if key_points else '- Experienced professional in ' + domain.replace('_', ' ')}
-- Key skills: {skills_context}
-- {projects_count} notable projects
-- {experience_count} professional experiences
+        response = await asyncio.to_thread(
+            self.model.generate_content,
+            prompt
+        )
 
-Tone: {tone}
-Emphasis: {emphasis}
+        if not response or not response.text:
+            raise RuntimeError("Gemini returned empty response")
 
-Structure to follow (but make it flow naturally):
-1. Opening hook (1 engaging sentence about who they are)
-2. Background (1-2 sentences about their professional journey)
-3. Expertise (2 sentences highlighting what they excel at)
-4. Passion/Motivation (1 sentence about what drives them)
-5. Current focus (1 sentence about what they're working on or interested in)
+        raw = self._extract_json(response.text)
 
-Requirements:
-- {self.config.bio_min_words}-{self.config.bio_max_words} words total
-- {tone} but engaging tone
-- Natural, conversational flow - NO robotic listing
-- First person voice ("I" statements)
-- NO buzzwords: avoid "passionate", "innovative", "dynamic", "cutting-edge"
-- NO meta-commentary like "Here is the bio" or "This bio"
-- Make it sound like a real person wrote it
-- Emphasize {emphasis} aspects
-
-Return ONLY the bio paragraph, no formatting, headers, or meta-text."""
-        
         try:
             # Generate with timeout
             response = await asyncio.wait_for(
@@ -1137,8 +830,6 @@ Requirements:
 - NO introductory phrases like "Here is" or "The description"
 - Make it sound professional but not robotic
 
-Return ONLY the enhanced description, no additional commentary."""
-        
         try:
             # Generate with timeout
             response = await asyncio.wait_for(
@@ -1261,10 +952,9 @@ Context:
 - Skills: {', '.join(user_profile.get('skills', [])[:5])}
 - Title: {user_profile.get('title', '')}
 
-Preferences:
-- Tone: {tone}
-- Style: {style}
-- Phrases to avoid: {avoid_str}
+    # ------------------------------------------------------------------
+    # PROMPT ENGINE (SCHEMA-AWARE)
+    # ------------------------------------------------------------------
 
 Requirements:
 - {self.config.hero_min_words}-{self.config.hero_max_words} words
@@ -1316,52 +1006,80 @@ Return ONLY the new tagline."""
     )
     async def _regenerate_bio(
         self,
-        context: Dict[str, Any],
-        preferences: Dict[str, Any]
+        schema: Dict[str, Any],
+        profile: Dict[str, Any],
     ) -> str:
-        """Regenerate bio with different emphasis."""
-        
-        # Rate limiting
-        await self.rate_limiter.acquire()
-        
-        emphasis = preferences.get('emphasis', EmphasisType.BALANCED.value)
-        length = preferences.get('length', 'medium')
-        tone = preferences.get('tone', ToneStyle.PROFESSIONAL.value)
-        
-        current_bio = context.get('current_content', '')
-        user_profile = context.get('user_profile', {})
-        existing_tone = context.get('existing_tone', 'professional')
-        
-        length_map = {
-            'short': '100-130',
-            'medium': '150-200',
-            'long': '220-280'
-        }
-        
-        word_range = length_map.get(length, '150-200')
-        
-        prompt = f"""Rewrite this bio with a different emphasis while keeping core facts.
+        return f"""
+You are an AI portfolio content generator.
 
-Current Bio: {current_bio}
+You will be given:
+1. A STRUCTURED SCHEMA produced by another system
+2. A USER PROFILE with factual data
 
-User Context:
-- Name: {user_profile.get('name')}
-- Skills: {', '.join(user_profile.get('skills', [])[:7])}
-- Current tone: {existing_tone}
+Your job:
+Convert the schema into FINAL, polished portfolio content.
 
-New Preferences:
-- Emphasis: {emphasis} (focus more on these aspects)
-- Tone: {tone}
-- Length: {word_range} words
+STRICT RULES:
+- Output ONLY valid JSON
+- No markdown, no explanations, no comments
+- Do NOT change schema intent
+- Do NOT invent experience, metrics, or facts
+- Use schema as authoritative guidance
 
-Requirements:
-- Keep all factual information accurate
-- Adjust emphasis to highlight {emphasis} aspects more
-- Match {tone} tone
-- Natural, engaging writing
-- First person voice
-- NO buzzwords
-- NO meta-commentary
+TARGET OUTPUT FORMAT:
+{{
+  "hero": {{
+    "name": string,
+    "tagline": string (max 100 chars),
+    "bio_short": string,
+    "avatar_url": null
+  }},
+  "bio_long": string (min 150 words),
+  "projects": [
+    {{
+      "title": string,
+      "description": string (min 50 chars),
+      "tech_stack": [string],
+      "featured": boolean,
+      "link": null
+    }}
+  ],
+  "skills": [
+    {{
+      "category": string,
+      "items": [string]
+    }}
+  ],
+  "theme": {{
+    "primary_color": "#RRGGBB",
+    "style": "modern_tech" | "minimalist" | "creative"
+  }},
+  "quality_score": number between 0 and 1
+}}
+
+SCHEMA (instructional, DO NOT MODIFY STRUCTURE):
+{json.dumps(schema, indent=2)}
+
+USER PROFILE (facts only):
+{json.dumps(profile, indent=2)}
+
+CONTENT GUIDELINES:
+- Professional, confident, human
+- Action-oriented language
+- No clichés ("passionate", "innovative", etc.)
+- Expand reference_points into natural prose
+- Respect layout_hints.density for verbosity
+- Highlight higher priority projects more strongly
+
+Generate the JSON now.
+"""
+
+    # ------------------------------------------------------------------
+    # UTILITIES
+    # ------------------------------------------------------------------
+
+    def _extract_json(self, text: str) -> str:
+        text = text.strip()
 
 Return ONLY the rewritten bio."""
         
@@ -1423,20 +1141,13 @@ Return ONLY the rewritten bio."""
         
         prompt = f"""Rewrite this project description with a different emphasis.
 
-Project: {current_project.get('title', 'Project')}
-Current Description: {current_project.get('description', '')}
-Technologies: {', '.join(current_project.get('technologies', []))}
+        start = text.find("{")
+        end = text.rfind("}")
 
-Preferences:
-- Emphasis: {emphasis}
-- Length: {word_range} words
+        if start == -1 or end == -1:
+            raise RuntimeError("No JSON object found in Gemini response")
 
-Requirements:
-- Adjust focus to emphasize {emphasis} aspects
-- Keep technical accuracy
-- Use strong action verbs
-- NO fabrication
-- NO meta-commentary
+        return text[start:end + 1]
 
 Return ONLY the new description."""
         
@@ -1530,163 +1241,4 @@ Return ONLY the new description."""
             logger.info("Cache cleared")
     
     def __repr__(self) -> str:
-        """String representation."""
-        return (
-            f"ContentGenerator(model={self.config.model_name}, "
-            f"temperature={self.config.temperature}, "
-            f"generations={self._generation_count})"
-        )
-
-
-# Example usage
-if __name__ == "__main__":
-    import asyncio
-    
-    # Configure logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    async def test_generator():
-        """Test the content generator."""
-        
-        # Create configuration
-        config = GenerationConfig(
-            model_name="gemini-1.5-pro",
-            temperature=0.7,
-            max_retries=2,
-            enable_cache=True
-        )
-        
-        # Initialize generator
-        try:
-            generator = ContentGenerator(config)
-        except ValueError as e:
-            print(f"\n❌ Error: {str(e)}")
-            print("Please set GEMINI_API_KEY environment variable")
-            return
-        
-        # Sample schema
-        schema = {
-            'domain': 'software_engineering',
-            'hero': {
-                'name': 'Alice Johnson',
-                'email': 'alice@example.com',
-                'title': 'Full-Stack Developer',
-                'template': 'Building scalable solutions'
-            },
-            'bio': {
-                'key_points': [
-                    '5+ years of experience in full-stack development',
-                    'Specialized in React, Node.js, and AWS',
-                    'Led team of 4 developers on major projects',
-                    'Passionate about clean code and user experience'
-                ]
-            },
-            'projects': [
-                {
-                    'id': 'proj_1',
-                    'title': 'E-commerce Platform',
-                    'raw_description': 'Built online shopping platform with React and Node.js',
-                    'tech_stack': ['React', 'Node.js', 'PostgreSQL', 'Redis'],
-                    'needs_enhancement': True,
-                    'target_length': 'medium',
-                    'featured': True
-                }
-            ],
-            'skills': ['React', 'Node.js', 'Python', 'AWS', 'Docker']
-        }
-        
-        # Sample user data
-        user_data = {
-            'name': 'Alice Johnson',
-            'email': 'alice@example.com',
-            'skills': ['React', 'Node.js', 'Python', 'AWS', 'Docker', 'PostgreSQL'],
-            'projects': [
-                {
-                    'title': 'E-commerce Platform',
-                    'description': 'Built online shopping platform'
-                }
-            ],
-            'experience': [],
-            'education': []
-        }
-        
-        print("\n" + "="*60)
-        print("TESTING CONTENT GENERATOR")
-        print("="*60 + "\n")
-        
-        try:
-            # Test health check
-            print("Running health check...")
-            health = await generator.health_check()
-            print(f"Health Status: {health['status']}\n")
-            
-            if health['status'] != 'ok':
-                print("❌ API not responding properly")
-                return
-            
-            # Generate content
-            print("Generating portfolio content...")
-            portfolio = await generator.generate(schema, user_data)
-            
-            print("\n" + "="*60)
-            print("CONTENT GENERATED SUCCESSFULLY")
-            print("="*60)
-            
-            # Display results
-            print(f"\n📝 Hero Section:")
-            print(f"   Name: {portfolio['hero']['name']}")
-            print(f"   Tagline: {portfolio['hero']['tagline']}")
-            
-            print(f"\n📖 Bio ({len(portfolio['bio'].split())} words):")
-            print(f"   {portfolio['bio'][:200]}...")
-            
-            print(f"\n🚀 Projects:")
-            for project in portfolio['projects']:
-                print(f"   - {project['title']}")
-                print(f"     {project['description'][:150]}...")
-            
-            # Display metrics
-            metrics = generator.get_metrics()
-            print(f"\n📊 Metrics:")
-            print(f"   Total Generations: {metrics['total_generations']}")
-            print(f"   Cache Hits: {metrics['cache_hits']}")
-            print(f"   Cache Hit Rate: {metrics['cache_hit_rate']:.1%}")
-            
-            # Test regeneration
-            print("\n" + "="*60)
-            print("TESTING REGENERATION")
-            print("="*60 + "\n")
-            
-            context = {
-                'user_profile': {
-                    'name': 'Alice Johnson',
-                    'skills': schema['skills'],
-                    'email': 'alice@example.com'
-                },
-                'current_content': portfolio['hero']
-            }
-            
-            print("Regenerating hero tagline with creative tone...")
-            new_hero = await generator.regenerate_section(
-                'hero',
-                context,
-                {'tone': 'creative', 'style': 'bold'}
-            )
-            
-            print(f"New Tagline: {new_hero['tagline']}")
-            
-            print("\n" + "="*60)
-            print("ALL TESTS PASSED!")
-            print("="*60 + "\n")
-            
-        except Exception as e:
-            print(f"\n❌ Error: {str(e)}")
-            import traceback
-            traceback.print_exc()
-    
-    # Run test
-    asyncio.run(test_generator())
-    
+        return f"GenerationAgent(model={self.model.model_name})"
